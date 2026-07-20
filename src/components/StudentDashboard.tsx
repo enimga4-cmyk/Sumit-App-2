@@ -60,6 +60,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Student, ChapterNote } from "../types";
 import { ALL_ACADEMIC_MONTHS, MONTH_NAMES } from "../utils/monthHelper";
 import { subscribeToAnnouncements } from "../lib/firestoreService";
+import PdfViewer from "./PdfViewer";
 
 interface StudentDashboardProps {
   student: Student;
@@ -1637,60 +1638,12 @@ export function StudentMyTab({
       {/* Student PDF Preview Modal */}
       {activePreviewPdf && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/70 animate-fadeIn backdrop-blur-sm" id="student-pdf-modal" onClick={() => setActivePreviewPdf(null)}>
-          <div className="absolute inset-0" />
           <div className="relative w-full h-full sm:h-[90vh] max-w-4xl bg-white dark:bg-slate-950 rounded-none sm:rounded-2xl p-0 shadow-2xl z-10 flex flex-col overflow-hidden border border-slate-100 dark:border-slate-900" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center bg-slate-900 text-white p-4 shrink-0">
-              <div className="flex items-center gap-2.5 truncate">
-                <FileText className="w-5 h-5 text-blue-400 shrink-0" />
-                <h2 className="text-sm font-bold truncate">{activePreviewPdf.title}</h2>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={activePreviewPdf.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-2.5 py-1.5 hover:bg-blue-600 bg-blue-500 text-white rounded-lg transition-all text-[11px] font-black flex items-center gap-1 shadow-xs"
-                  title="Open PDF in New Tab"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Open in New Tab</span>
-                </a>
-                <a
-                  href={activePreviewPdf.url}
-                  download={`${activePreviewPdf.title.replace(/\s+/g, "_")}.pdf`}
-                  className="p-2 hover:bg-white/10 text-slate-300 hover:text-white rounded-lg transition-all border border-slate-700"
-                  title="Download PDF"
-                >
-                  <Download className="w-4 h-4" />
-                </a>
-                <button
-                  onClick={() => setActivePreviewPdf(null)}
-                  className="p-2 hover:bg-white/10 text-slate-300 hover:text-white rounded-lg transition-all cursor-pointer border border-slate-700"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Disclaimer Bar */}
-            <div className="bg-amber-50 dark:bg-amber-950/20 border-b border-amber-100 dark:border-amber-900/30 px-4 py-2 text-center text-[10px] sm:text-[11px] font-bold text-amber-800 dark:text-amber-400 shrink-0">
-              If the preview is blank, please click the <span className="font-extrabold uppercase">"Open in New Tab"</span> button above or use the Download option.
-            </div>
-
-            <div className="flex-1 bg-slate-100 dark:bg-slate-900 p-2 sm:p-4 flex items-center justify-center relative">
-              {activePreviewPdf.url ? (
-                <iframe
-                  src={activePreviewPdf.url.startsWith("data:") ? activePreviewPdf.url : `${activePreviewPdf.url}#toolbar=1&view=FitH&page=1`}
-                  className="w-full h-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white"
-                  title={activePreviewPdf.title}
-                />
-              ) : (
-                <div className="text-center p-6 text-slate-500">
-                  <p className="font-bold text-sm">Cannot render raw data format directly</p>
-                  <p className="text-xs text-slate-400 mt-1">Please use the Download button to open this PDF document.</p>
-                </div>
-              )}
-            </div>
+            <PdfViewer
+              url={activePreviewPdf.url}
+              title={activePreviewPdf.title}
+              onClose={() => setActivePreviewPdf(null)}
+            />
           </div>
         </div>
       )}

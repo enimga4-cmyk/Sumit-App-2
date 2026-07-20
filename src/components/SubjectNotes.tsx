@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { ChapterNote } from "../types";
 import { uploadPdfToStorage } from "../lib/storageService";
+import PdfViewer from "./PdfViewer";
 
 interface SubjectNotesProps {
   subject: string;
@@ -440,54 +441,13 @@ export default function SubjectNotes({
 
       {/* --- IN-APP PDF PREVIEW DRAWER MODAL --- */}
       {activePreviewPdf && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/70" id="pdf-preview-modal">
-          <div className="absolute inset-0" onClick={() => setActivePreviewPdf(null)} />
-          
-          <div className="relative w-full h-full sm:h-[90vh] max-w-4xl bg-white dark:bg-slate-950 rounded-none sm:rounded-2xl p-0 shadow-2xl z-10 flex flex-col overflow-hidden border border-slate-100 dark:border-slate-900">
-            {/* Header bar */}
-            <div className="flex justify-between items-center bg-slate-900 text-white p-4 shrink-0">
-              <div className="flex items-center gap-2.5 truncate">
-                <FileText className="w-5 h-5 text-blue-400" />
-                <h2 className="text-sm font-bold truncate">
-                  {activePreviewPdf.title}
-                </h2>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <a 
-                  href={activePreviewPdf.url}
-                  download={`${activePreviewPdf.title.replace(/\s+/g, "_")}.pdf`}
-                  className="p-2 hover:bg-white/10 text-slate-300 hover:text-white rounded-lg transition-all"
-                  title="Download PDF"
-                >
-                  <Download className="w-4 h-4" />
-                </a>
-                <button
-                  onClick={() => setActivePreviewPdf(null)}
-                  className="p-2 hover:bg-white/10 text-slate-300 hover:text-white rounded-lg transition-all cursor-pointer"
-                  title="Close Preview"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Interactive PDF Preview pane */}
-            <div className="flex-1 bg-slate-100 dark:bg-slate-900 p-2 sm:p-4 flex items-center justify-center relative">
-              {activePreviewPdf.url ? (
-                <iframe
-                  src={`${activePreviewPdf.url}#toolbar=1`}
-                  className="w-full h-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white"
-                  title={activePreviewPdf.title}
-                  id="pdf-preview-iframe"
-                />
-              ) : (
-                <div className="text-center p-6 text-slate-500">
-                  <p className="font-bold text-sm">Cannot render raw data format directly</p>
-                  <p className="text-xs text-slate-400 mt-1">Please use the Download button to open this PDF document.</p>
-                </div>
-              )}
-            </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-sm animate-fadeIn" id="pdf-preview-modal" onClick={() => setActivePreviewPdf(null)}>
+          <div className="relative w-full h-full sm:h-[90vh] max-w-4xl bg-white dark:bg-slate-950 rounded-none sm:rounded-2xl p-0 shadow-2xl z-10 flex flex-col overflow-hidden border border-slate-100 dark:border-slate-900" onClick={(e) => e.stopPropagation()}>
+            <PdfViewer
+              url={activePreviewPdf.url}
+              title={activePreviewPdf.title}
+              onClose={() => setActivePreviewPdf(null)}
+            />
           </div>
         </div>
       )}
