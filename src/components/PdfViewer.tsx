@@ -1,9 +1,25 @@
 import React, { useEffect, useState, useRef } from "react";
-import { FileText, Download, X, AlertTriangle } from "lucide-react";
+import { FileText, Download, X, AlertTriangle, RefreshCw } from "lucide-react";
 import { getFirebaseStorage } from "../lib/firebase";
 import { ref, getDownloadURL } from "firebase/storage";
 
 // Dynamic hook to load PDF.js library and worker from CDN
+export function preloadPdfJs() {
+  if (typeof window === "undefined" || (window as any).pdfjsLib) {
+    return;
+  }
+  const script = document.createElement("script");
+  script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+  script.async = true;
+  script.onload = () => {
+    const pdfjsLib = (window as any).pdfjsLib;
+    if (pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
+  };
+  document.body.appendChild(script);
+}
+
 export function usePdfJs() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +47,9 @@ export function usePdfJs() {
   return { loaded, error };
 }
 
+// In-memory cache for resolved Firebase Storage download URLs to avoid duplicate getDownloadURL() calls
+const resolvedUrlCache = new Map<string, string>();
+
 // Convert a generic Storage path or gs:// URL to a dynamic HTTPS download URL
 export async function getPdfDownloadUrl(pdfUrl: string): Promise<string> {
   console.log(`[PDF View Debug] Resolving PDF URL:`, pdfUrl);
@@ -40,6 +59,21 @@ export async function getPdfDownloadUrl(pdfUrl: string): Promise<string> {
   if (pdfUrl.startsWith("http://") || pdfUrl.startsWith("https://") || pdfUrl.startsWith("data:")) {
     console.log(`[PDF View Debug] Already direct HTTP/HTTPS/data link:`, pdfUrl);
     return pdfUrl;
+  }
+  
+  // Return cached resolved URL if exists
+  if (resolvedUrlCache.has(pdfUrl)) {
+    const cached = resolvedUrlCache.get(pdfUrl)!;
+    console.log(`[PDF View Debug] Returning cached resolved URL:`, cached);
+    return cached;
+  }
+
+  const persistedKey = `resolved_pdf_url_${pdfUrl.replace(/[^a-zA-Z0-9]/g, "_")}`;
+  const persistedUrl = localStorage.getItem(persistedKey);
+  if (persistedUrl) {
+    console.log(`[PDF View Debug] Returning persisted resolved URL:`, persistedUrl);
+    resolvedUrlCache.set(pdfUrl, persistedUrl);
+    return persistedUrl;
   }
   
   try {
@@ -61,6 +95,11 @@ export async function getPdfDownloadUrl(pdfUrl: string): Promise<string> {
     const storageRef = ref(storage, path);
     const downloadUrl = await getDownloadURL(storageRef);
     console.log(`[PDF View Debug] Successfully fetched download URL:`, downloadUrl);
+    
+    // Store in cache
+    resolvedUrlCache.set(pdfUrl, downloadUrl);
+    localStorage.setItem(persistedKey, downloadUrl);
+    
     return downloadUrl;
   } catch (error: any) {
     console.error("[PDF View Debug] getDownloadURL error:", error);
@@ -169,17 +208,23 @@ export default function PdfViewer({ url, title, onClose }: PdfViewerProps) {
   const { loaded: pdfjsLoaded, error: pdfjsLoadError } = usePdfJs();
   const [pdf, setPdf] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [downloadProgress, setDownloadProgress] = useState<number>(0);
+  const [statusText, setStatusText] = useState<string>("Initializing...");
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(1.2);
   const [resolvedUrl, setResolvedUrl] = useState<string>("");
+  const [retryTrigger, setRetryTrigger] = useState(0);
 
   useEffect(() => {
     let active = true;
+    let xhr: XMLHttpRequest | null = null;
 
     async function resolveAndLoad() {
       try {
         setLoading(true);
         setError(null);
+        setDownloadProgress(0);
+        setStatusText("Resolving document path...");
         
         console.log(`[PDF View Debug] Starting resolution. Original URL/Path:`, url);
         
@@ -193,35 +238,80 @@ export default function PdfViewer({ url, title, onClose }: PdfViewerProps) {
           if (pdfjsLoadError) {
             throw new Error(pdfjsLoadError);
           }
+          setStatusText("Preparing PDF engine...");
           return; // Wait for next tick when pdfjsLoaded becomes true
         }
 
-        console.log(`[PDF View Debug] Fetching and rendering PDF from Resolved URL:`, dlUrl);
+        // 3. Local File Caching (Check Cache Storage API)
+        const cacheSupported = "caches" in window;
+        let pdfBlob: Blob | null = null;
 
-        let arrayBuffer: ArrayBuffer;
-        if (dlUrl.startsWith("data:")) {
-          const arr = dlUrl.split(",");
-          const bstr = atob(arr[1]);
-          let n = bstr.length;
-          const u8arr = new Uint8Array(n);
-          while (n--) {
-            u8arr[n] = bstr.charCodeAt(n);
+        if (cacheSupported) {
+          try {
+            const cache = await caches.open("student-pdf-cache");
+            // Match using original url prop as stable unique version key
+            const cachedResponse = await cache.match(url);
+            if (cachedResponse) {
+              console.log(`[PDF Cache] Local cache hit for stable key:`, url);
+              setStatusText("Opening PDF from device storage...");
+              pdfBlob = await cachedResponse.blob();
+            }
+          } catch (e) {
+            console.warn(`[PDF Cache] Error checking local cache:`, e);
           }
-          arrayBuffer = u8arr.buffer;
-        } else {
-          const response = await fetch(dlUrl).catch((err) => {
-            console.error("[PDF View Debug] Fetch error:", err);
-            throw new Error("Network error.");
-          });
-
-          if (!response.ok) {
-            if (response.status === 404) throw new Error("PDF not found.");
-            if (response.status === 403) throw new Error("Permission denied.");
-            throw new Error("Network error.");
-          }
-          arrayBuffer = await response.arrayBuffer();
         }
 
+        // 4. Download if not cached
+        if (!pdfBlob) {
+          console.log(`[PDF View Debug] Downloading PDF from:`, dlUrl);
+          setStatusText("Downloading… 0%");
+
+          pdfBlob = await new Promise<Blob>((resolve, reject) => {
+            xhr = new XMLHttpRequest();
+            xhr.open("GET", dlUrl, true);
+            xhr.responseType = "blob";
+
+            xhr.onprogress = (event) => {
+              if (event.lengthComputable && active) {
+                const percent = Math.round((event.loaded / event.total) * 100);
+                setDownloadProgress(percent);
+                setStatusText(`Downloading… ${percent}%`);
+              }
+            };
+
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(xhr.response);
+              } else {
+                reject(new Error(`Failed to download PDF. Status: ${xhr.status}`));
+              }
+            };
+
+            xhr.onerror = () => {
+              reject(new Error("Network error."));
+            };
+
+            xhr.send();
+          });
+
+          // Save to Local File Cache for subsequent instant accesses
+          if (cacheSupported && pdfBlob && active) {
+            try {
+              const cache = await caches.open("student-pdf-cache");
+              await cache.put(url, new Response(pdfBlob.slice(0), {
+                headers: { "Content-Type": "application/pdf" }
+              }));
+              console.log(`[PDF Cache] Saved file to local storage:`, url);
+            } catch (e) {
+              console.warn(`[PDF Cache] Failed to write to local cache:`, e);
+            }
+          }
+        }
+
+        if (!active) return;
+        setStatusText("Opening PDF…");
+
+        const arrayBuffer = await pdfBlob!.arrayBuffer();
         const pdfjsLib = (window as any).pdfjsLib;
         const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
         
@@ -255,8 +345,15 @@ export default function PdfViewer({ url, title, onClose }: PdfViewerProps) {
 
     return () => {
       active = false;
+      if (xhr) {
+        xhr.abort();
+      }
     };
-  }, [pdfjsLoaded, pdfjsLoadError, url]);
+  }, [pdfjsLoaded, pdfjsLoadError, url, retryTrigger]);
+
+  const handleRetry = () => {
+    setRetryTrigger(prev => prev + 1);
+  };
 
   return (
     <div className="absolute inset-0 flex flex-col bg-slate-900 text-white select-none">
@@ -313,9 +410,19 @@ export default function PdfViewer({ url, title, onClose }: PdfViewerProps) {
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
               <FileText className="absolute w-5 h-5 text-blue-400 animate-pulse" />
             </div>
-            <div className="text-center">
-              <p className="font-bold text-sm text-slate-200">Retrieving PDF document...</p>
-              <p className="text-xs text-slate-400 mt-1">Downloading from Firebase and preparing rendering engine</p>
+            <div className="text-center flex flex-col items-center max-w-sm">
+              <p className="font-bold text-sm text-slate-200">{statusText}</p>
+              {downloadProgress > 0 && downloadProgress < 100 && (
+                <div className="w-48 h-1.5 bg-slate-700 rounded-full overflow-hidden mt-3 border border-slate-800">
+                  <div 
+                    className="h-full bg-blue-500 transition-all duration-300"
+                    style={{ width: `${downloadProgress}%` }}
+                  />
+                </div>
+              )}
+              <p className="text-[10px] text-slate-400 mt-2">
+                Downloading via direct secure Firebase channel. File is cached locally after completion.
+              </p>
             </div>
           </div>
         )}
@@ -328,9 +435,16 @@ export default function PdfViewer({ url, title, onClose }: PdfViewerProps) {
             <div>
               <h3 className="font-bold text-base text-rose-400">{error}</h3>
               <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                We encountered an issue opening this chapter notes. You can still download the original document using the button in the header if available.
+                We encountered an issue opening this chapter notes. Please check your internet connection or use the download button above.
               </p>
             </div>
+            <button
+              onClick={handleRetry}
+              className="mt-2 flex items-center gap-1.5 px-4 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md cursor-pointer transition-all active:scale-95"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry Download</span>
+            </button>
           </div>
         )}
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { LayoutDashboard, Users, Settings as SettingsIcon, BookOpen } from "lucide-react";
+import { LayoutDashboard, Users, Settings as SettingsIcon, BookOpen, RefreshCw } from "lucide-react";
 import { Student, ChapterNote } from "./types";
 import { INITIAL_STUDENTS } from "./data";
 import Dashboard from "./components/Dashboard";
@@ -12,6 +12,7 @@ import Settings from "./components/Settings";
 import Login from "./components/Login";
 import StudentDashboard, { StudentMyTab } from "./components/StudentDashboard";
 import { getMonthsUpToCurrent } from "./utils/monthHelper";
+import { preloadPdfJs } from "./components/PdfViewer";
 import { getFirebaseAuth, createNewUserAuth } from "./lib/firebase";
 import { 
   getUserDocument, 
@@ -23,7 +24,7 @@ import {
   deleteUserAuthCredentials
 } from "./lib/firestoreService";
 
-const APP_VERSION = "3.2.1";
+const APP_VERSION = "3.4.0";
 
 function normalizeStudent(student: Partial<Student> | null | undefined): Student {
   return {
@@ -74,6 +75,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("tuition_auth_state", JSON.stringify(auth));
   }, [auth]);
+
+  // Preload PDF.js library in background on mount for lightning-fast viewing
+  useEffect(() => {
+    preloadPdfJs();
+  }, []);
 
   // Synchronize with Firebase Authentication state
   useEffect(() => {
@@ -975,6 +981,17 @@ export default function App() {
             Logout
           </button>
         </div>
+
+        {/* Small absolute refresh button on top-right below the logout button */}
+        {auth.role !== null && (
+          <button
+            onClick={() => window.location.reload()}
+            className="absolute top-13 right-4 z-30 flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200/60 dark:border-slate-800/80 bg-white/95 dark:bg-slate-900/95 text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-200 dark:hover:border-blue-900/60 active:scale-90 transition-all shadow-xs cursor-pointer"
+            title="Refresh App"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        )}
 
         {/* Scrollable primary content viewport */}
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 pt-5 sm:pt-6 pb-24" id="main-content-scroll">

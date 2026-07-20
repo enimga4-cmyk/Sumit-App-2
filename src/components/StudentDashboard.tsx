@@ -60,7 +60,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Student, ChapterNote } from "../types";
 import { ALL_ACADEMIC_MONTHS, MONTH_NAMES } from "../utils/monthHelper";
 import { subscribeToAnnouncements } from "../lib/firestoreService";
-import PdfViewer from "./PdfViewer";
+import PdfViewer, { getPdfDownloadUrl } from "./PdfViewer";
 
 interface StudentDashboardProps {
   student: Student;
@@ -103,7 +103,7 @@ export function generateSubjectPdfReport(student: Student, subject: string, note
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.text(`Generated on: ${currentDate}`, 14, 29);
-  doc.text(`App Version: 3.2.1`, 14, 34);
+  doc.text(`App Version: 3.4.0`, 14, 34);
 
   // Student & Subject Info Section
   doc.setTextColor(15, 23, 42); // slate-900
@@ -249,7 +249,41 @@ export function generateSubjectPdfReport(student: Student, subject: string, note
   doc.text("This report is generated dynamically by the Personal Study Space portal.", 14, 280);
   doc.text("© 2026 Tuition Ledger Academy", 150, 280);
 
-  doc.save(`${student.name.replace(/\s+/g, "_")}_${subject.replace(/\s+/g, "_")}_Report.pdf`);
+  // Save PDF report with robust sandboxed iframe fallbacks
+  const fileName = `${student.name.replace(/\s+/g, "_")}_${subject.replace(/\s+/g, "_")}_Report.pdf`;
+  try {
+    doc.save(fileName);
+  } catch (error) {
+    console.warn("[PDF Generator] Standard doc.save failed, trying Blob download fallback:", error);
+    try {
+      const blob = doc.output("blob");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("[PDF Generator] Blob fallback failed:", e);
+      // Final fallback: open data uri in new tab or frame
+      try {
+        const string = doc.output("datauristring");
+        const x = window.open();
+        if (x) {
+          x.document.open();
+          x.document.write(`<iframe width='100%' height='100%' style='border:0' src='${string}'></iframe>`);
+          x.document.close();
+        } else {
+          window.location.href = string;
+        }
+      } catch (err) {
+        console.error("[PDF Generator] All fallback attempts failed:", err);
+      }
+    }
+  }
 }
 
 function formatDate(value?: string) {
@@ -607,15 +641,26 @@ function StudentDetailsModal({ isOpen, onClose, student, formatDate }: StudentDe
           </div>
 
           <div className="grid gap-2 grid-cols-2">
-            <div className="rounded-2xl border border-indigo-50 bg-indigo-50/45 p-2.5">
+            <div className="rounded-2xl border border-indigo-50 bg-indigo-50/45 p-2.5 col-span-2">
               <p className="text-[9px] font-black uppercase tracking-[0.24em] text-indigo-600">Password</p>
               <p className="mt-0.5 text-xs font-bold text-slate-700">{student.password || "N/A"}</p>
             </div>
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-2.5">
-              <p className="text-[9px] font-black uppercase tracking-[0.24em] text-slate-400">Enrolled Subjects</p>
-              <p className="mt-0.5 text-xs font-semibold text-slate-700 truncate" title={student.enrolledSubjects?.join(", ")}>
-                {student.enrolledSubjects?.length ? student.enrolledSubjects.join(", ") : "None"}
-              </p>
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 col-span-2">
+              <p className="text-[9px] font-black uppercase tracking-[0.24em] text-slate-400 mb-1.5">Enrolled Subjects</p>
+              <div className="flex flex-wrap gap-1.5">
+                {!student.enrolledSubjects || student.enrolledSubjects.length === 0 ? (
+                  <span className="text-xs text-slate-400 italic">No enrolled subjects</span>
+                ) : (
+                  student.enrolledSubjects.map((sub) => (
+                    <span
+                      key={sub}
+                      className="text-xs font-bold px-3 py-1 bg-blue-50 text-blue-600 rounded-full border border-blue-100/20"
+                    >
+                      {sub}
+                    </span>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -638,7 +683,7 @@ function StudentHeader({ student }: StudentHeaderProps) {
         </span>
       </div>
       <div className="rounded-full border border-slate-200/70 bg-slate-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">
-        v3.0.0
+        v3.4.0
       </div>
     </div>
   );
@@ -1412,20 +1457,28 @@ export function StudentMyTab({
     setActivePreviewPdf({ url, title: `Chapter ${note.chapterNo}: ${note.chapterName}` });
   };
 
-  const handleDownloadPdf = (note: ChapterNote) => {
+  const handleDownloadPdf = async (note: ChapterNote) => {
     if (!note.pdfUrl) return;
-    if (note.pdfUrl.startsWith("data:")) {
+    try {
+      let url = note.pdfUrl;
+      if (!url.startsWith("data:")) {
+        // Resolve path to direct secure Firebase download URL
+        url = await getPdfDownloadUrl(url);
+      }
+      
       const link = document.createElement("a");
-      link.href = note.pdfUrl;
+      link.href = url;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       link.download = `${note.chapterName.replace(/\s+/g, "_")}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      return;
+    } catch (e) {
+      console.error("Error downloading PDF:", e);
+      // Fallback: try opening it
+      window.open(note.pdfUrl, "_blank", "noopener,noreferrer");
     }
-    window.open(note.pdfUrl, "_blank", "noopener,noreferrer");
   };
 
   const getFileSizeStr = (pdfUrl: string, chapterNo: number) => {

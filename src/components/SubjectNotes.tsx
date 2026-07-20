@@ -47,6 +47,7 @@ export default function SubjectNotes({
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfName, setPdfName] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -131,13 +132,15 @@ export default function SubjectNotes({
 
     try {
       setIsUploading(true);
+      setUploadProgress(0);
       setError("");
 
       const uploadedUrl = await uploadPdfToStorage(
         studentId || "sandbox",
         subject,
         pdfName,
-        pdfFile
+        pdfFile,
+        (progress) => setUploadProgress(progress)
       );
 
       onAddNote(
@@ -158,6 +161,7 @@ export default function SubjectNotes({
       setError(err.message || "Failed to upload file");
     } finally {
       setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -168,6 +172,7 @@ export default function SubjectNotes({
     setPdfName("");
     setIsAdding(false);
     setError("");
+    setUploadProgress(0);
   };
 
   return (
@@ -319,6 +324,21 @@ export default function SubjectNotes({
               </p>
             )}
 
+            {isUploading && (
+              <div className="w-full flex flex-col gap-1 mt-1 animate-fadeIn">
+                <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                  <span>Uploading files directly to Storage...</span>
+                  <span>{uploadProgress}%</span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-blue-600 transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Action buttons */}
             <div className="flex gap-2 justify-end pt-1 border-t border-slate-50 dark:border-slate-850 mt-1">
               <button
@@ -337,7 +357,7 @@ export default function SubjectNotes({
                 {isUploading ? (
                   <>
                     <span className="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full" />
-                    <span>Uploading to Storage...</span>
+                    <span>Uploading… {uploadProgress}%</span>
                   </>
                 ) : (
                   <span>Upload Chapter Note</span>

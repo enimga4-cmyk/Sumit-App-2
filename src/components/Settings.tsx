@@ -1227,7 +1227,7 @@ export default function Settings({
             Developed and Designed by Sumit
           </span>
           <span className="text-[10px] font-black tracking-[0.15em] text-slate-500 dark:text-slate-450 uppercase">Academy Connect</span>
-          <span className="text-[8px] font-extrabold uppercase tracking-[0.25em] text-slate-400 dark:text-slate-500">Version 3.2.0</span>
+          <span className="text-[8px] font-extrabold uppercase tracking-[0.25em] text-slate-400 dark:text-slate-500">Version 3.4.0</span>
           <span className="text-[8px] font-black tracking-widest text-slate-500 dark:text-slate-400 uppercase">—POWERED BY ANDROID—</span>
         </div>
       </div>
