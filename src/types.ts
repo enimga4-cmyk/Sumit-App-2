@@ -7,6 +7,30 @@ export interface ChapterNote {
   isCompleted?: boolean; // For tracking revision progress
   remark?: string; // Specific tutor remark on student's performance/difficulty
   createdAt: string;
+
+  // Supabase storage metadata
+  storageProvider?: "supabase";
+  bucket?: string;
+  storagePath?: string;
+  fileName?: string;
+  fileSize?: number;
+  mimeType?: string;
+  uploadedAt?: string;
+  uploadedBy?: string;
+  downloadUrl?: string;
+}
+
+export interface StudentReport {
+  id: string;
+  storageProvider: "supabase";
+  bucket: string;
+  storagePath: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedAt: string;
+  uploadedBy: string;
+  downloadUrl: string;
 }
 
 export interface Student {
@@ -25,10 +49,14 @@ export interface Student {
   enrolledSubjects: string[]; // e.g. ["Computer Science", "English", "Mathematics", "Science"]
   avatarUrl?: string; // custom image url
   avatarColor?: string; // fallback background color
+  avatarStorageProvider?: "supabase";
+  avatarBucket?: string;
+  avatarStoragePath?: string;
   notes: Record<string, ChapterNote[]>; // subject -> list of pdf notes
   attendance: Record<string, boolean | "na">; // date (YYYY-MM-DD) -> present (true), absent (false), or N/A ("na")
   email?: string;
   password?: string;
+  reports?: StudentReport[];
 }
 
 export interface TuitionStats {

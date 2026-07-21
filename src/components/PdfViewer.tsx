@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { FileText, Download, X, AlertTriangle, RefreshCw } from "lucide-react";
-import { getFirebaseStorage } from "../lib/firebase";
-import { ref, getDownloadURL } from "firebase/storage";
+import { getPdfDownloadUrl } from "../lib/pdfService";
 
 // Dynamic hook to load PDF.js library and worker from CDN
 export function preloadPdfJs() {
@@ -45,71 +44,6 @@ export function usePdfJs() {
   }, []);
 
   return { loaded, error };
-}
-
-// In-memory cache for resolved Firebase Storage download URLs to avoid duplicate getDownloadURL() calls
-const resolvedUrlCache = new Map<string, string>();
-
-// Convert a generic Storage path or gs:// URL to a dynamic HTTPS download URL
-export async function getPdfDownloadUrl(pdfUrl: string): Promise<string> {
-  console.log(`[PDF View Debug] Resolving PDF URL:`, pdfUrl);
-  if (!pdfUrl) {
-    throw new Error("PDF not found.");
-  }
-  if (pdfUrl.startsWith("http://") || pdfUrl.startsWith("https://") || pdfUrl.startsWith("data:")) {
-    console.log(`[PDF View Debug] Already direct HTTP/HTTPS/data link:`, pdfUrl);
-    return pdfUrl;
-  }
-  
-  // Return cached resolved URL if exists
-  if (resolvedUrlCache.has(pdfUrl)) {
-    const cached = resolvedUrlCache.get(pdfUrl)!;
-    console.log(`[PDF View Debug] Returning cached resolved URL:`, cached);
-    return cached;
-  }
-
-  const persistedKey = `resolved_pdf_url_${pdfUrl.replace(/[^a-zA-Z0-9]/g, "_")}`;
-  const persistedUrl = localStorage.getItem(persistedKey);
-  if (persistedUrl) {
-    console.log(`[PDF View Debug] Returning persisted resolved URL:`, persistedUrl);
-    resolvedUrlCache.set(pdfUrl, persistedUrl);
-    return persistedUrl;
-  }
-  
-  try {
-    const storage = await getFirebaseStorage();
-    if (!storage) {
-      throw new Error("Failed to retrieve Firebase download URL (storage not initialized).");
-    }
-    
-    let path = pdfUrl;
-    if (path.startsWith("gs://")) {
-      const bucketAndPath = path.substring(5);
-      const slashIndex = bucketAndPath.indexOf("/");
-      if (slashIndex !== -1) {
-        path = bucketAndPath.substring(slashIndex + 1);
-      }
-    }
-    
-    console.log(`[PDF View Debug] Resolved Storage Path to reference:`, path);
-    const storageRef = ref(storage, path);
-    const downloadUrl = await getDownloadURL(storageRef);
-    console.log(`[PDF View Debug] Successfully fetched download URL:`, downloadUrl);
-    
-    // Store in cache
-    resolvedUrlCache.set(pdfUrl, downloadUrl);
-    localStorage.setItem(persistedKey, downloadUrl);
-    
-    return downloadUrl;
-  } catch (error: any) {
-    console.error("[PDF View Debug] getDownloadURL error:", error);
-    if (error.code === 'storage/unauthorized' || error.message?.includes('permission')) {
-      throw new Error("Permission denied.");
-    } else if (error.code === 'storage/object-not-found' || error.message?.includes('not found')) {
-      throw new Error("PDF not found.");
-    }
-    throw new Error(`Failed to retrieve Firebase download URL.`);
-  }
 }
 
 interface PdfPageProps {

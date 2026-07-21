@@ -23,6 +23,7 @@ import {
   saveUserDocument,
   deleteUserAuthCredentials
 } from "./lib/firestoreService";
+import { deleteFileFromStorage, uploadProfilePhoto } from "./lib/storageService";
 
 const APP_VERSION = "3.4.0";
 
@@ -585,15 +586,39 @@ export default function App() {
     isCompleted: boolean = false,
     remark: string = ""
   ) => {
+    let finalPdfUrl = pdfUrl;
+    let extraMetadata: Partial<ChapterNote> = {};
+    
+    if (pdfUrl && pdfUrl.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(pdfUrl);
+        finalPdfUrl = parsed.storagePath || parsed.downloadUrl || pdfUrl;
+        extraMetadata = {
+          storageProvider: "supabase",
+          bucket: parsed.bucket,
+          storagePath: parsed.storagePath,
+          fileName: parsed.fileName,
+          fileSize: parsed.fileSize,
+          mimeType: parsed.mimeType,
+          uploadedAt: parsed.uploadedAt,
+          uploadedBy: parsed.uploadedBy,
+          downloadUrl: parsed.downloadUrl
+        };
+      } catch (e) {
+        console.error("[handleAddNote] Failed to parse JSON metadata for pdfUrl:", e);
+      }
+    }
+
     const newNote: ChapterNote = {
       id: `note-${Date.now()}`,
       chapterNo,
       chapterName,
-      pdfUrl,
+      pdfUrl: finalPdfUrl,
       pdfFileName,
       isCompleted,
       remark,
       createdAt: new Date().toISOString(),
+      ...extraMetadata
     };
 
     let updated: Student | null = null;
@@ -624,6 +649,19 @@ export default function App() {
     subject: string,
     noteId: string
   ) => {
+    // Find the note to get its storagePath/pdfUrl for deletion
+    const targetStudent = students.find((s) => s.id === studentId);
+    if (targetStudent) {
+      const subjectNotes = targetStudent.notes[subject] || [];
+      const noteToDelete = subjectNotes.find((n) => n.id === noteId);
+      if (noteToDelete) {
+        const pathToDelete = noteToDelete.storagePath || noteToDelete.pdfUrl;
+        if (pathToDelete) {
+          await deleteFileFromStorage(pathToDelete);
+        }
+      }
+    }
+
     let updated: Student | null = null;
     setStudents((prev) =>
       prev.map((s) => {
@@ -738,22 +776,55 @@ export default function App() {
 
   // Save profile photo
   const handleSaveProfilePhoto = async (studentId: string, dataUrl: string) => {
-    let updated: Student | null = null;
-    setStudents((prev) =>
-      prev.map((s) => {
-        if (s.id === studentId) {
-          updated = {
-            ...s,
-            avatarUrl: dataUrl,
-          };
-          return updated;
-        }
-        return s;
-      })
-    );
-    setTimeout(async () => {
-      if (updated) await saveStudentDoc(updated);
-    }, 50);
+    try {
+      const currentStudent = students.find((s) => s.id === studentId);
+      if (currentStudent && currentStudent.avatarStoragePath) {
+        // Delete old avatar from storage to avoid orphan files
+        await deleteFileFromStorage(currentStudent.avatarStoragePath);
+      }
+
+      // Upload base64 image as file to Supabase Storage
+      const metadata = await uploadProfilePhoto(studentId, dataUrl, `${studentId}_avatar.png`);
+
+      let updated: Student | null = null;
+      setStudents((prev) =>
+        prev.map((s) => {
+          if (s.id === studentId) {
+            updated = {
+              ...s,
+              avatarUrl: metadata.downloadUrl,
+              avatarStorageProvider: "supabase",
+              avatarBucket: metadata.bucket,
+              avatarStoragePath: metadata.storagePath,
+            };
+            return updated;
+          }
+          return s;
+        })
+      );
+
+      setTimeout(async () => {
+        if (updated) await saveStudentDoc(updated);
+      }, 50);
+    } catch (err) {
+      console.error("[App] Failed to save profile photo to Supabase Storage, using local fallback:", err);
+      let updated: Student | null = null;
+      setStudents((prev) =>
+        prev.map((s) => {
+          if (s.id === studentId) {
+            updated = {
+              ...s,
+              avatarUrl: dataUrl,
+            };
+            return updated;
+          }
+          return s;
+        })
+      );
+      setTimeout(async () => {
+        if (updated) await saveStudentDoc(updated);
+      }, 50);
+    }
   };
 
   // Triggering edit from student list

@@ -1,9 +1,9 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import {defineConfig, loadEnv} from 'vite';
 
-export default defineConfig(({ command }) => {
+export default defineConfig(({ command, mode }) => {
   // Determine HMR configuration based on environment
   let hmrConfig: any = true;
 
@@ -22,8 +22,24 @@ export default defineConfig(({ command }) => {
     };
   }
 
+  // Load env variables from files and merge with process.env
+  const fileEnv = loadEnv(mode, process.cwd(), 'VITE_');
+  const envDefine: Record<string, any> = {};
+  
+  // Collect all VITE_ variables from process.env and fileEnv
+  const allKeys = new Set([
+    ...Object.keys(process.env).filter(k => k.startsWith('VITE_')),
+    ...Object.keys(fileEnv).filter(k => k.startsWith('VITE_'))
+  ]);
+
+  for (const key of allKeys) {
+    const val = process.env[key] || fileEnv[key] || '';
+    envDefine[`import.meta.env.${key}`] = JSON.stringify(val);
+  }
+
   return {
     plugins: [react(), tailwindcss()],
+    define: envDefine,
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { getInstitutionName } from "../lib/firestoreService";
+import { getInstitutionName, saveStudentDoc } from "../lib/firestoreService";
+import { uploadReportToStorage } from "../lib/storageService";
 import { 
   ArrowLeft, 
   Phone, 
@@ -642,8 +643,10 @@ export default function StudentDetails({
     
     // Save report with robust sandboxed iframe fallbacks
     const fileName = `${student.name.replace(/\s+/g, "_")}_Progress_Report.pdf`;
+    let isStandardSaveSuccess = false;
     try {
       doc.save(fileName);
+      isStandardSaveSuccess = true;
     } catch (error) {
       console.warn("[PDF Generator] Standard doc.save failed, trying Blob download fallback:", error);
       try {
@@ -657,6 +660,7 @@ export default function StudentDetails({
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        isStandardSaveSuccess = true;
       } catch (e) {
         console.error("[PDF Generator] Blob fallback failed:", e);
         // Final fallback: open data uri in new tab or frame
@@ -667,13 +671,52 @@ export default function StudentDetails({
             x.document.open();
             x.document.write(`<iframe width='100%' height='100%' style='border:0' src='${string}'></iframe>`);
             x.document.close();
+            isStandardSaveSuccess = true;
           } else {
             window.location.href = string;
+            isStandardSaveSuccess = true;
           }
         } catch (err) {
           console.error("[PDF Generator] All fallback attempts failed:", err);
         }
       }
+    }
+
+    // Automatically upload the generated report to Supabase Storage and store metadata in Firestore
+    try {
+      const blob = doc.output("blob");
+      console.log(`[StudentDetails] Uploading generated progress report to Supabase Storage: ${fileName}`);
+      
+      (async () => {
+        try {
+          const metadata = await uploadReportToStorage(student.id, blob, fileName);
+          
+          const newReport = {
+            id: `report-${Date.now()}`,
+            storageProvider: "supabase" as const,
+            bucket: metadata.bucket,
+            storagePath: metadata.storagePath,
+            fileName: metadata.fileName,
+            fileSize: metadata.fileSize,
+            mimeType: metadata.mimeType,
+            uploadedAt: metadata.uploadedAt,
+            uploadedBy: "Admin",
+            downloadUrl: metadata.downloadUrl,
+          };
+
+          const updatedStudent = {
+            ...student,
+            reports: [...(student.reports || []), newReport],
+          };
+
+          await saveStudentDoc(updatedStudent);
+          console.log("[StudentDetails] Successfully uploaded report and saved metadata to Firestore.");
+        } catch (uploadError) {
+          console.error("[StudentDetails] Failed to upload report to Supabase in the background:", uploadError);
+        }
+      })();
+    } catch (blobError) {
+      console.error("[StudentDetails] Failed to generate blob for upload:", blobError);
     }
   };
 

@@ -1,7 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
 
 export const firebaseConfig = {
   apiKey: "AIzaSyASbswlD6JRb_jEoYE4JVcMsolPyR6t5to",
@@ -16,7 +15,6 @@ export const firebaseConfig = {
 let appInstance: any = null;
 let dbInstance: any = null;
 let authInstance: any = null;
-let storageInstance: any = null;
 let initializationPromise: Promise<void> | null = null;
 
 export async function ensureFirebaseInitialized(): Promise<void> {
@@ -67,13 +65,11 @@ export async function ensureFirebaseInitialized(): Promise<void> {
 
       authInstance = getAuth(appInstance);
       dbInstance = getFirestore(appInstance);
-      storageInstance = getStorage(appInstance);
     } catch (err) {
       console.warn("[Firebase] Initialization failed. App will operate in local fallback/sandbox mode.", err);
       appInstance = null;
       authInstance = null;
       dbInstance = null;
-      storageInstance = null;
     }
   })();
 
@@ -142,11 +138,6 @@ export async function getFirebaseAuth() {
 export async function getFirebaseDb() {
   await ensureFirebaseInitialized();
   return dbInstance;
-}
-
-export async function getFirebaseStorage() {
-  await ensureFirebaseInitialized();
-  return storageInstance;
 }
 
 export enum OperationType {

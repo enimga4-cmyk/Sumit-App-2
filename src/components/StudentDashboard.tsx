@@ -59,8 +59,10 @@ import { jsPDF } from "jspdf";
 import { AnimatePresence, motion } from "motion/react";
 import { Student, ChapterNote } from "../types";
 import { ALL_ACADEMIC_MONTHS, MONTH_NAMES } from "../utils/monthHelper";
-import { subscribeToAnnouncements } from "../lib/firestoreService";
-import PdfViewer, { getPdfDownloadUrl } from "./PdfViewer";
+import { subscribeToAnnouncements, saveStudentDoc } from "../lib/firestoreService";
+import { uploadReportToStorage } from "../lib/storageService";
+import PdfViewer from "./PdfViewer";
+import { getPdfDownloadUrl } from "../lib/pdfService";
 
 interface StudentDashboardProps {
   student: Student;
@@ -251,8 +253,10 @@ export function generateSubjectPdfReport(student: Student, subject: string, note
 
   // Save PDF report with robust sandboxed iframe fallbacks
   const fileName = `${student.name.replace(/\s+/g, "_")}_${subject.replace(/\s+/g, "_")}_Report.pdf`;
+  let isStandardSaveSuccess = false;
   try {
     doc.save(fileName);
+    isStandardSaveSuccess = true;
   } catch (error) {
     console.warn("[PDF Generator] Standard doc.save failed, trying Blob download fallback:", error);
     try {
@@ -266,6 +270,7 @@ export function generateSubjectPdfReport(student: Student, subject: string, note
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      isStandardSaveSuccess = true;
     } catch (e) {
       console.error("[PDF Generator] Blob fallback failed:", e);
       // Final fallback: open data uri in new tab or frame
@@ -276,13 +281,52 @@ export function generateSubjectPdfReport(student: Student, subject: string, note
           x.document.open();
           x.document.write(`<iframe width='100%' height='100%' style='border:0' src='${string}'></iframe>`);
           x.document.close();
+          isStandardSaveSuccess = true;
         } else {
           window.location.href = string;
+          isStandardSaveSuccess = true;
         }
       } catch (err) {
         console.error("[PDF Generator] All fallback attempts failed:", err);
       }
     }
+  }
+
+  // Automatically upload the generated report to Supabase Storage and store metadata in Firestore
+  try {
+    const blob = doc.output("blob");
+    console.log(`[StudentDashboard] Uploading subject progress report to Supabase Storage: ${fileName}`);
+    
+    (async () => {
+      try {
+        const metadata = await uploadReportToStorage(student.id, blob, fileName);
+        
+        const newReport = {
+          id: `report-${Date.now()}`,
+          storageProvider: "supabase" as const,
+          bucket: metadata.bucket,
+          storagePath: metadata.storagePath,
+          fileName: metadata.fileName,
+          fileSize: metadata.fileSize,
+          mimeType: metadata.mimeType,
+          uploadedAt: metadata.uploadedAt,
+          uploadedBy: student.name,
+          downloadUrl: metadata.downloadUrl,
+        };
+
+        const updatedStudent = {
+          ...student,
+          reports: [...(student.reports || []), newReport],
+        };
+
+        await saveStudentDoc(updatedStudent);
+        console.log("[StudentDashboard] Successfully uploaded subject report and saved metadata to Firestore.");
+      } catch (uploadError) {
+        console.error("[StudentDashboard] Failed to upload subject report to Supabase in background:", uploadError);
+      }
+    })();
+  } catch (blobError) {
+    console.error("[StudentDashboard] Failed to generate blob for upload:", blobError);
   }
 }
 
